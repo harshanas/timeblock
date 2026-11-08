@@ -1,0 +1,1 @@
+ALTER TABLE blocks ADD COLUMN labels_json TEXT NOT NULL DEFAULT '[]';

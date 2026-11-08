@@ -1,0 +1,16 @@
+export const COLORS = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30', '#FF2D55', '#30B0C7', '#FFCC00', '#5856D6', '#A2845E'];
+export const uid = () => Math.random().toString(36).slice(2, 9) + Math.random().toString(36).slice(2, 6);
+export const pad = (n: number) => String(n).padStart(2, '0');
+export const ds = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+export const parse = (s: string) => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+export const addDays = (s: string, n: number) => { const d = parse(s); d.setDate(d.getDate() + n); return ds(d); };
+export const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
+export const snap = (m: number) => Math.round(m / 15) * 15;
+export const hm = (m: number) => `${pad(Math.floor(m / 60) % 24)}:${pad(m % 60)}`;
+export const fmtT = (m: number) => { let h = Math.floor(m / 60) % 24; const mm = m % 60, ap = h < 12 ? 'AM' : 'PM'; h = h % 12 || 12; return `${h}:${pad(mm)} ${ap}`; };
+const rgb = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+export const hexA = (h: string, a: number) => { const [r, g, b] = rgb(h); return `rgba(${r},${g},${b},${a})`; };
+export const darken = (h: string, f: number) => { const [r, g, b] = rgb(h).map(v => Math.round(v * (1 - f))); return `rgb(${r},${g},${b})`; };
+export const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+export const DOW = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+export const DOWL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];

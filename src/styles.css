@@ -1,0 +1,32 @@
+html,body{margin:0;height:100%;background:#fff;-webkit-font-smoothing:antialiased;}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Helvetica Neue",sans-serif;color:#1d1d1f;}
+body.login{background:#F5F5F7}
+#root{height:100%}
+*{box-sizing:border-box}
+input,textarea,button,select{font-family:inherit;color:inherit}
+input::placeholder,textarea::placeholder{color:rgba(60,60,67,.35)}
+a{color:#007AFF;text-decoration:none}
+a:hover{text-decoration:underline}
+input[type=time]::-webkit-calendar-picker-indicator{display:none}
+
+/* style-hover equivalents from the design */
+.hv-row:hover{background:rgba(0,0,0,0.04)!important}
+.hv-icon:hover{background:rgba(0,0,0,0.06)!important}
+.hv-white:hover{background:#fff!important}
+.hv-blue:hover{background:#0068DA!important}
+.hv-close:hover{background:rgba(0,0,0,0.1)!important}
+.hv-soft:hover{background:rgba(0,0,0,0.05)!important}
+.hv-gray:hover{background:rgba(0,0,0,0.09)!important}
+.hv-redsoft:hover{background:rgba(255,59,48,0.16)!important}
+.hv-redghost:hover{background:rgba(255,59,48,0.08)!important}
+
+/* hover-revealed row actions (delete buttons); always visible on touch devices */
+.row-act{opacity:0;transition:opacity .12s}
+.hv-row:hover .row-act,.hv-lbl:hover .row-act,.hv-task:hover .row-act,.row-act:focus-visible{opacity:1}
+.row-act:hover{background:rgba(0,0,0,0.06)!important}
+@media (hover:none){.row-act{opacity:.6}}
+
+.no-callout{-webkit-touch-callout:none}
+@keyframes tb-sheet-in{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+@keyframes tb-drawer-in{from{transform:translateX(-100%)}to{transform:none}}
+@keyframes tb-fade-in{from{opacity:0}to{opacity:1}}
