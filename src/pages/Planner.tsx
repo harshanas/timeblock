@@ -5,7 +5,7 @@ import type { Block, Doc, Label, Task } from '../../shared/types';
 import { BLOCK_STYLE, HOUR_HEIGHT, MOBILE_BREAKPOINT, WEEK_STARTS_ON } from '../config';
 import { api } from '../api';
 import { Syncer, type SyncStatus } from '../state/sync';
-import { COLORS, DOW, DOWL, MONTHS, addDays, clamp, darken, ds, fmtT, hexA, hm, parse, snap, uid } from '../lib/util';
+import { ALL_DAYS, COLORS, DOW, DOWL, MONTHS, dayOrder, daysSummary, endSummary, occursOn, repeatLastDate, shortDate, addDays, clamp, darken, ds, fmtT, hexA, hm, parse, snap, uid } from '../lib/util';
 
 type Sel = { kind: 'block'; id: string; date: string } | { kind: 'task'; id: string } | null;
 type Preview =
@@ -40,6 +40,8 @@ interface Drag {
 }
 
 const DOC_KEYS = ['tasks', 'blocks', 'backlog', 'labels', 'showUnlabeled'] as const;
+const MONDAY_FIRST = WEEK_STARTS_ON === 'Monday';
+const normBlock = (b: Block): Block => ({ ...b, labels: b.labels ?? [], repeatDays: b.repeatDays?.length ? b.repeatDays : ALL_DAYS, repeatEnd: b.repeatEnd ?? null });
 const mq = () => window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
 
 const Check = ({ size = 9 }: { size?: number }) => (
@@ -78,7 +80,7 @@ export default class Planner extends React.Component<Props, State> {
     const now = new Date();
     this.state = {
       ...props.initial,
-      blocks: props.initial.blocks.map(b => b.labels ? b : { ...b, labels: [] }),
+      blocks: props.initial.blocks.map(normBlock),
       viewStart: null, sel: null, expanded: null, preview: null,
       taskDraft: '', backlogDraft: '', labelDraft: '', linkDraft: '', now,
       isMobile: this.mql.matches, mobileDays: 1, drawerOpen: false, syncStatus: 'saved',
@@ -122,8 +124,9 @@ export default class Planner extends React.Component<Props, State> {
     try {
       const doc = await api.state();
       if (this.syncer.dirty || this.drag) return;
-      this.syncer.reset(doc);
-      this.setState({ ...doc });
+      const norm = { ...doc, blocks: doc.blocks.map(normBlock) };
+      this.syncer.reset(norm);
+      this.setState({ ...norm });
     } catch { /* ignore; next save will surface errors */ }
   };
 
@@ -238,7 +241,7 @@ export default class Planner extends React.Component<Props, State> {
   }
 
   createBlock(date: string, start: number, end: number, extra: Partial<Block> = {}) {
-    const b: Block = { id: uid(), date, start, end, title: 'New Block', repeat: false, tasks: [], labels: [], ...extra };
+    const b: Block = { id: uid(), date, start, end, title: 'New Block', repeat: false, tasks: [], labels: [], repeatDays: ALL_DAYS, repeatEnd: null, ...extra };
     this.wantFocus = !extra.tasks && !this.state.isMobile;
     this.setState(s => ({ blocks: [...s.blocks, b], sel: { kind: 'block', id: b.id, date }, expanded: null, preview: null, drawerOpen: false }));
     return b;
@@ -490,7 +493,7 @@ export default class Planner extends React.Component<Props, State> {
   // mobile: tap-to-schedule replaces drag-and-drop from the backlog.
   renderSchedule(t: Task) {
     const S = this.state;
-    const options = S.blocks.filter(b => b.repeat || b.date === S.schedDate).sort((a, b) => a.start - b.start);
+    const options = S.blocks.filter(b => b.repeat ? occursOn(b, S.schedDate) : b.date === S.schedDate).sort((a, b) => a.start - b.start);
     const go = () => {
       const [h, m] = S.schedTime.split(':').map(Number);
       if (!S.schedDate || isNaN(h)) return;
@@ -552,7 +555,7 @@ export default class Planner extends React.Component<Props, State> {
       const occ: Occ[] = [];
       for (const b0 of S.blocks) {
         const b = P && P.kind === 'block' && P.id === b0.id ? { ...b0, start: P.start, end: P.end, date: P.date } : b0;
-        if (!b.repeat && b.date !== date) continue;
+        if (b.repeat ? !occursOn(b, date) : b.date !== date) continue;
         const ts = b.tasks.map(id => S.tasks[id]).filter(Boolean), vt = ts.filter(vis);
         const selected = !!(S.sel && S.sel.kind === 'block' && S.sel.id === b.id && (!b.repeat || S.sel.date === date));
         const own = ownLabels(b);
@@ -688,16 +691,25 @@ export default class Planner extends React.Component<Props, State> {
           </div>
           {routines.map(b => {
             const ts = b.tasks.map(id => S.tasks[id]).filter(Boolean);
+            const sub = [b.repeatDays.length < 7 ? daysSummary(b.repeatDays, MONDAY_FIRST) : '', endSummary(b, today)].filter(Boolean).join(' · ');
             return (
-              <div key={b.id} className="hv-row" onClick={() => this.setState({ sel: { kind: 'block', id: b.id, date: inView ? today : ws }, expanded: null, drawerOpen: false })}
+              <div key={b.id} className="hv-row" onClick={() => {
+                  // Show the routine on its first occurrence in view (today if it runs today).
+                  const cands = [...Array(N)].map((_, i) => addDays(ws, i));
+                  const date = (inView && occursOn(b, today) ? today : cands.find(dd => occursOn(b, dd))) ?? (inView ? today : ws);
+                  this.setState({ sel: { kind: 'block', id: b.id, date }, expanded: null, drawerOpen: false });
+                }}
                 style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 8px', borderRadius: 8, cursor: 'pointer', background: S.sel && S.sel.kind === 'block' && S.sel.id === b.id ? 'rgba(0,122,255,0.12)' : 'transparent' }}>
                 <RepeatIcon size={13} stroke={blockColor(b, ts)} />
-                <span style={{ flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.title || 'Untitled'}</span>
+                <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.title || 'Untitled'}</span>
+                  {sub && <span style={{ fontSize: 11, color: '#8E8E93', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</span>}
+                </div>
                 <span style={{ color: '#8E8E93', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>{fmtT(b.start)}</span>
               </div>
             );
           })}
-          {routines.length === 0 && <div style={{ padding: '4px 8px', color: '#8E8E93', lineHeight: '18px' }}>Blocks set to repeat every day show up here.</div>}
+          {routines.length === 0 && <div style={{ padding: '4px 8px', color: '#8E8E93', lineHeight: '18px' }}>Blocks set to repeat show up here.</div>}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -760,7 +772,7 @@ export default class Planner extends React.Component<Props, State> {
         const ts = sb.tasks.map(id => S.tasks[id]).filter(Boolean);
         tasks = ts.map(t => this.taskItem(t, sb, date, vis, L));
         const doneN = ts.filter(t => this.isDone(t, sb, date)).length;
-        kicker = sb.repeat ? 'DAILY ROUTINE' : 'TIME BLOCK';
+        kicker = !sb.repeat ? 'TIME BLOCK' : sb.repeatDays.length === 7 ? 'DAILY ROUTINE' : 'ROUTINE';
         const setTime = (k: 'start' | 'end', v: string) => {
           const [h, m] = v.split(':').map(Number); if (isNaN(h)) return;
           const mins = h * 60 + (m || 0); let { start, end } = sb;
@@ -774,7 +786,7 @@ export default class Planner extends React.Component<Props, State> {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <input ref={this.titleRef} value={sb.title} onChange={e => this.updBlock(sb.id, { title: e.target.value })} placeholder="Block name"
                 style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 22, fontWeight: 700, letterSpacing: -0.5, padding: 0, width: '100%' }} />
-              <span style={{ color: '#8E8E93', fontSize: 13 }}>{sb.repeat ? `Every day · showing ${DOWL[dt.getDay()]}, ${MONTHS[dt.getMonth()].slice(0, 3)} ${dt.getDate()}` : `${DOWL[dt.getDay()]}, ${MONTHS[dt.getMonth()]} ${dt.getDate()}`}</span>
+              <span style={{ color: '#8E8E93', fontSize: 13 }}>{sb.repeat ? `${daysSummary(sb.repeatDays, MONDAY_FIRST)} · showing ${DOWL[dt.getDay()]}, ${MONTHS[dt.getMonth()].slice(0, 3)} ${dt.getDate()}` : `${DOWL[dt.getDay()]}, ${MONTHS[dt.getMonth()]} ${dt.getDate()}`}</span>
             </div>
             <div style={{ background: '#F5F5F7', borderRadius: 10, display: 'flex', flexDirection: 'column' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', height: 40, borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
@@ -786,9 +798,69 @@ export default class Planner extends React.Component<Props, State> {
                 <input type="time" step={900} value={sb.end >= 1440 ? '23:59' : hm(sb.end)} onChange={e => setTime('end', e.target.value)} style={timeInput} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 12px', height: 44 }}>
-                <div style={{ display: 'flex', flexDirection: 'column' }}><span>Repeat every day</span></div>
-                <Toggle on={sb.repeat} w={38} h={22} onClick={() => this.updBlock(sb.id, { repeat: !sb.repeat, date: sb.repeat ? date : sb.date })} />
+                <div style={{ display: 'flex', flexDirection: 'column' }}><span>{sb.repeat ? 'Repeat' : 'Repeat every day'}</span></div>
+                <Toggle on={sb.repeat} w={38} h={22} onClick={() => this.updBlock(sb.id, sb.repeat ? { repeat: false, date, repeatEnd: null } : { repeat: true, repeatDays: ALL_DAYS, repeatEnd: null })} />
               </div>
+              {sb.repeat && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '0 12px 12px' }}>
+                  <div role="group" aria-label="Repeat on" style={{ display: 'flex', justifyContent: 'space-between', gap: 4 }}>
+                    {dayOrder(MONDAY_FIRST).map(d => {
+                      const on = sb.repeatDays.includes(d), last = on && sb.repeatDays.length === 1;
+                      return (
+                        <button key={d} aria-pressed={on} aria-label={DOWL[d]} title={last ? 'At least one day is required' : DOWL[d]} disabled={last}
+                          onClick={() => this.updBlock(sb.id, { repeatDays: on ? sb.repeatDays.filter(x => x !== d) : [...sb.repeatDays, d].sort() })}
+                          style={{ width: 32, height: 32, borderRadius: '50%', border: 'none', padding: 0, cursor: last ? 'default' : 'pointer', fontSize: 12, fontWeight: 600, background: on ? '#007AFF' : '#fff', color: on ? '#fff' : '#3c3c43', boxShadow: on ? 'none' : 'inset 0 0 0 1px rgba(0,0,0,0.1)', transition: 'background .15s' }}>
+                          {DOWL[d][0]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {([['Every day', ALL_DAYS], ['Weekdays', [1, 2, 3, 4, 5]], ['Weekends', [0, 6]]] as const).map(([name, days]) => {
+                      const active = days.length === sb.repeatDays.length && days.every(x => sb.repeatDays.includes(x));
+                      return (
+                        <button key={name} onClick={() => this.updBlock(sb.id, { repeatDays: [...days] })}
+                          style={{ border: 'none', background: active ? 'rgba(0,122,255,0.12)' : 'rgba(0,0,0,0.05)', color: active ? '#007AFF' : '#3c3c43', borderRadius: 6, height: 24, padding: '0 9px', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>{name}</button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                    <span>Ends</span>
+                    <div role="group" aria-label="Ends" style={{ display: 'flex', gap: 6 }}>
+                      {([['Never', null], ['On date', { type: 'until', date: addDays(date, 30) }], ['After', { type: 'count', count: 10 }]] as const).map(([name, end]) => {
+                        const active = (sb.repeatEnd?.type ?? null) === (end?.type ?? null);
+                        return (
+                          // Occurrences are counted from the day being viewed, so an old routine doesn't start out already used up.
+                          <button key={name} aria-pressed={active} onClick={() => { if (!active) this.updBlock(sb.id, end?.type === 'count' ? { repeatEnd: end, date } : { repeatEnd: end }); }}
+                            style={{ border: 'none', background: active ? 'rgba(0,122,255,0.12)' : 'rgba(0,0,0,0.05)', color: active ? '#007AFF' : '#3c3c43', borderRadius: 6, height: 24, padding: '0 9px', fontSize: 12, fontWeight: 500, cursor: 'pointer' }}>{name}</button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {sb.repeatEnd?.type === 'until' && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>Last day</span>
+                      <input type="date" aria-label="Last day" value={sb.repeatEnd.date} onChange={e => { if (e.target.value) this.updBlock(sb.id, { repeatEnd: { type: 'until', date: e.target.value } }); }} style={timeInput} />
+                    </div>
+                  )}
+                  {sb.repeatEnd?.type === 'count' && (() => {
+                    const count = sb.repeatEnd.count;
+                    return (
+                      <>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <span>Occurrences</span>
+                          {/* Uncontrolled so the field can be empty while typing; a blur restores the saved value. */}
+                          <input key={sb.id} type="number" aria-label="Occurrences" min={1} max={999} defaultValue={count}
+                            onChange={e => { const n = Number(e.target.value); if (Number.isInteger(n) && n >= 1 && n <= 999) this.updBlock(sb.id, { repeatEnd: { type: 'count', count: n } }); }}
+                            onBlur={e => { e.target.value = String(count); }}
+                            style={{ ...timeInput, width: 64, textAlign: 'right' }} />
+                        </div>
+                        <span style={{ color: '#8E8E93', fontSize: 12 }}>{`${shortDate(sb.date, ds(S.now))} to ${shortDate(repeatLastDate(sb)!, ds(S.now))}`}</span>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px 12px', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
                 <span>Labels</span>
                 {this.labelPicker('block:' + sb.id, sb.labels, fn => this.setState(s => ({ blocks: s.blocks.map(b => b.id === sb.id ? { ...b, labels: fn(b.labels) } : b) })))}

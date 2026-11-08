@@ -1,4 +1,4 @@
-import type { Block, Doc, Label, SyncPayload, Task } from '../shared/types';
+import type { Block, Doc, Label, RepeatEnd, SyncPayload, Task } from '../shared/types';
 
 const DEFAULT_LABELS: Label[] = [
   { id: 'work', name: 'Work', color: '#007AFF', on: true },
@@ -42,7 +42,9 @@ export async function loadDoc(db: D1Database): Promise<Doc> {
     tasks: taskMap,
     blocks: (blocks.results as any[]).map((r): Block => ({
       id: r.id, date: r.date, start: r.start_min, end: r.end_min, title: r.title,
-      repeat: !!r.is_repeat, tasks: json(r.task_ids_json, []), labels: json(r.labels_json, [])
+      repeat: !!r.is_repeat, tasks: json(r.task_ids_json, []), labels: json(r.labels_json, []),
+      repeatDays: json(r.repeat_days_json, [0, 1, 2, 3, 4, 5, 6]),
+      repeatEnd: json<RepeatEnd | null>(r.repeat_end_json, null)
     })),
     backlog: json<string[]>(m.backlog, []).filter(id => taskMap[id]),
     showUnlabeled: json(m.showUnlabeled, true)
@@ -52,6 +54,16 @@ export async function loadDoc(db: D1Database): Promise<Doc> {
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const strArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter(isStr) : []);
+const dayArr = (v: unknown): number[] => {
+  const d = Array.isArray(v) ? [...new Set(v.filter((x): x is number => Number.isInteger(x) && x >= 0 && x <= 6))].sort() : [];
+  return d.length ? d : [0, 1, 2, 3, 4, 5, 6];
+};
+const repeatEnd = (v: unknown): RepeatEnd | null => {
+  const e = v as Partial<{ type: string; date: unknown; count: unknown }> | null | undefined;
+  if (e?.type === 'until' && isStr(e.date) && /^\d{4}-\d{2}-\d{2}$/.test(e.date)) return { type: 'until', date: e.date };
+  if (e?.type === 'count' && Number.isInteger(e.count) && (e.count as number) >= 1) return { type: 'count', count: Math.min(e.count as number, 999) };
+  return null;
+};
 
 export async function applySync(db: D1Database, p: SyncPayload): Promise<void> {
   const now = Date.now();
@@ -81,10 +93,10 @@ export async function applySync(db: D1Database, p: SyncPayload): Promise<void> {
   for (const b of up.blocks ?? []) {
     if (!isStr(b.id) || !isStr(b.date) || !isNum(b.start) || !isNum(b.end)) continue;
     stmts.push(db.prepare(
-      `INSERT INTO blocks (id, date, start_min, end_min, title, is_repeat, task_ids_json, labels_json, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-       ON CONFLICT(id) DO UPDATE SET date = ?2, start_min = ?3, end_min = ?4, title = ?5, is_repeat = ?6, task_ids_json = ?7, labels_json = ?8, updated_at = ?9`
-    ).bind(b.id, b.date, b.start, b.end, isStr(b.title) ? b.title : '', b.repeat ? 1 : 0, JSON.stringify(strArr(b.tasks)), JSON.stringify(strArr(b.labels)), now));
+      `INSERT INTO blocks (id, date, start_min, end_min, title, is_repeat, task_ids_json, labels_json, repeat_days_json, repeat_end_json, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+       ON CONFLICT(id) DO UPDATE SET date = ?2, start_min = ?3, end_min = ?4, title = ?5, is_repeat = ?6, task_ids_json = ?7, labels_json = ?8, repeat_days_json = ?9, repeat_end_json = ?10, updated_at = ?11`
+    ).bind(b.id, b.date, b.start, b.end, isStr(b.title) ? b.title : '', b.repeat ? 1 : 0, JSON.stringify(strArr(b.tasks)), JSON.stringify(strArr(b.labels)), JSON.stringify(dayArr(b.repeatDays)), JSON.stringify(repeatEnd(b.repeatEnd)), now));
   }
   for (const id of strArr(del.labels)) stmts.push(db.prepare(`DELETE FROM labels WHERE id = ?`).bind(id));
   for (const id of strArr(del.tasks)) stmts.push(db.prepare(`DELETE FROM tasks WHERE id = ?`).bind(id));
